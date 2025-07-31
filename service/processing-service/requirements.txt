@@ -1,0 +1,9 @@
+opencv-python
+fastapi
+python-jose
+SQLAlchemy
+ultralytics
+python-dotenv
+psycopg2
+python-multipart
+uvicorn

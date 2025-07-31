@@ -1,0 +1,8 @@
+# services/sensor-service/.dockerignore
+
+node_modules
+dist
+*.log
+.env
+Dockerfile
+docker-compose.yml

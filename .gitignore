@@ -72,3 +72,4 @@ $RECYCLE.BIN/
 *.swp
 *~
 log/
+/generateKey.ipynb

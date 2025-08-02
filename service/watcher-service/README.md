@@ -1,6 +1,3 @@
-แน่นอน นี่ `README.md` ที่ละเอียดสำหรับ **watcher-service** — ครอบคลุมตั้งแต่ภาพรวม สถาปัตยกรรม การตั้งค่า สตาร์ท พัฒนา ดีบัก และ edge cases:
-
-````md
 # watcher-service
 
 `watcher-service` เป็น service ที่เฝ้าดูไฟล์ใหม่ใน **MinIO** สอง bucket (`thermo-raw` กับ `thermo-processed`), ทำการ upsert ข้อมูลลงในฐานข้อมูล, แล้วส่ง event ไปยัง **RabbitMQ** พร้อม context (เช่น ไฟล์, device, status) รวมถึงมีเมคานิซึม reconciliation เพื่อจัดการกรณีที่งาน “ติด” (stuck)

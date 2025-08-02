@@ -17,9 +17,9 @@ lerna-debug.log*
 .pnpm-debug.log*
 
 # Env files
-.env
-.env.*
-.env.local
+# .env
+# .env.*
+# .env.local
 
 # macOS
 .DS_Store

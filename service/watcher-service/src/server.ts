@@ -1,7 +1,7 @@
-// services/data-service/src/server.ts
+// service/watcher-service/src/server.ts
 
 import 'reflect-metadata';
-import express, { Application, Request, Response } from 'express';
+import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -9,6 +9,8 @@ import morgan from 'morgan';
 import { AppDataSource } from './utils/dataSource';
 import { errorHandler } from './middleware/errorHandler';
 import { PORT } from './configs/config';
+import { watchRawAndProcessedBuckets } from './services/watchRawBucket.service';
+import { startReconciliationLoop } from './services/reconciliation.service';
 
 async function startServer() {
   try {
@@ -21,40 +23,55 @@ async function startServer() {
       process.exit(1);
     });
 
-    // 1) Initialize DB connection
+    // 1) Init DB
     await AppDataSource.initialize();
     console.log('✅ DataSource has been initialized');
 
-    const app: Application = express();
-
-    // 2) Security & logging middleware
+    // 2) Create app and middleware
+    const app = express();
     app.use(helmet());
     app.use(cors());
     app.use(morgan('combined'));
     app.use(express.json());
 
-    // 3) Health-check endpoint
-    app.get('/health', (_req: Request, res: Response) => {
+    // 3) Health check
+    app.get('/health', (_req, res) => {
+      console.log('Health check hit');
       res.json({ status: 'ok', ts: new Date().toISOString() });
     });
 
-    // 4) (Optional) Mount other routers here if/when added
-    // e.g., app.use('/api', someRouter);
-
-    // 5) Global error handler (should be after all routes)
+    // 4) Error handler (after routes)
     app.use(errorHandler);
 
-    // 6) Start server
+    // 5) Listen
     const server = app.listen(PORT, () => {
-      console.log(`🚀 Server is running on http://localhost:${PORT}`);
+      console.log(`🚀 Watcher service running on http://localhost:${PORT}`);
+
+      // เริ่มเฝ้าดูทั้ง raw + processed buckets
+      try {
+        watchRawAndProcessedBuckets();
+      } catch (e) {
+        console.error('❌ Failed to start bucket watchers:', e);
+      }
+
+      // เริ่ม reconciliation loop
+      try {
+        startReconciliationLoop();
+      } catch (e) {
+        console.error('❌ Failed to start reconciliation loop:', e);
+      }
     });
 
-    // 7) Graceful shutdown
+    // 6) Graceful shutdown
     const shutdown = () => {
       console.log('⚡️ Shutting down server...');
       server.close(async () => {
-        await AppDataSource.destroy();
-        console.log('✅ DataSource has been destroyed');
+        try {
+          await AppDataSource.destroy();
+          console.log('✅ DataSource has been destroyed');
+        } catch (e) {
+          console.warn('⚠️ Error during DataSource destroy:', e);
+        }
         process.exit(0);
       });
     };

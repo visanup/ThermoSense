@@ -7,15 +7,21 @@
   "original_cluster_name": "rabbit@temporary",
   "explanation": "Bootstrap with thermo vhost/exchange/queues and role-based permissions",
   "vhosts": [
-    { "name": "/" },
-    { "name": "thermo" }
+    {
+      "name": "/"
+    },
+    {
+      "name": "thermo"
+    }
   ],
   "users": [
     {
       "name": "admin",
       "password_hash": "nWAgZEnQ5VSZ14A6W8zSx0q3un0K6nhJDMqh7xTc+3lvEK7D",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
-      "tags": ["administrator"],
+      "tags": [
+        "administrator"
+      ],
       "limits": {}
     },
     {
@@ -72,9 +78,9 @@
     {
       "user": "minio_amqp_user",
       "vhost": "thermo",
-      "configure": ".*",
-      "write": ".*",
-      "read": ".*"
+      "configure": "",
+      "write": "thermo_exchange",
+      "read": ""
     },
     {
       "user": "processing_user",
@@ -94,8 +100,14 @@
   "topic_permissions": [],
   "parameters": [],
   "global_parameters": [
-    { "name": "cluster_tags", "value": [] },
-    { "name": "internal_cluster_id", "value": "rabbitmq-cluster-id-UWQcAdunnmpIJ8O6gm1gLA" }
+    {
+      "name": "cluster_tags",
+      "value": []
+    },
+    {
+      "name": "internal_cluster_id",
+      "value": "rabbitmq-cluster-id-UWQcAdunnmpIJ8O6gm1gLA"
+    }
   ],
   "policies": [],
   "queues": [

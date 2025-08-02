@@ -1,22 +1,25 @@
-# การติดตั้งและตั้งค่า RabbitMQ บน Ubuntu สำหรับโครงการ ThermoSense
+# RabbitMQ Installation & Configuration for ThermoSense (Standalone on Ubuntu)
 
-ไฟล์นี้อธิบายขั้นตอนการติดตั้งและตั้งค่า RabbitMQ บน Ubuntu 20.04/22.04 แบบไม่ใช้ Docker พร้อมการสร้าง vhosts, users, exchanges, queues, bindings, การเตรียมไฟล์ definitions สำหรับ import, และการเชื่อมต่อกับ MinIO Notifications เพื่อรองรับ Workflow ของระบบ ThermoSense
+เอกสารนี้สรุปขั้นตอนการ **ติดตั้ง** และ **ตั้งค่า** RabbitMQ บน Ubuntu 20.04/22.04 (ไม่ใช้ Docker) เพื่อให้สามารถใช้ร่วมกับ MinIO Notification (AMQP) ใน pipeline ของ ThermoSense  
+โฟลว์ที่ตั้งใจ:  
+`raw.created` → processing → `processed.created` → OCR
 
 ---
 
 ## สารบัญ
 
 1. [Prerequisites](#prerequisites)  
-2. [ติดตั้ง Erlang และ RabbitMQ](#1-ติดตั้ง-erlang-และ-rabbitmq)  
+2. [ติดตั้ง Erlang และ RabbitMQ (แบบปลอดภัย/ทันสมัย)](#1-ติดตั้ง-erlang-และ-rabbitmq-แบบปลอดภัย)  
 3. [เปิดใช้งาน Management Plugin และสตาร์ทบริการ](#2-เปิดใช้งาน-management-plugin-และสตาร์ทบริการ)  
 4. [ตั้งค่า Firewall (ถ้ามี)](#3-ตั้งค่า-firewall-ถ้ามี)  
 5. [สร้าง Virtual Host และ Users พร้อมสิทธิ์](#4-สร้าง-virtual-host-และ-users-พร้อมสิทธิ์)  
-6. [สร้าง Exchange / Queues / Bindings](#5-สร้าง-exchange--queues--bindings)  
-7. [เตรียม rabbitmq_definitions.json ที่ import ได้](#6-เตรียม-rabbitmqdefinitionsjson-ที่-import-ได้)  
+6. [ประกาศ Exchange / Queue / Binding](#5-ประกาศ-exchange--queue--binding)  
+7. [เตรียม `rabbitmq_definitions.json` สำหรับ reuse (export/import)](#6-เตรียม-rabbitmqdefinitionsjson-สำหรับ-reuse-exportimport)  
 8. [เชื่อมต่อกับ MinIO Notifications (AMQP)](#7-เชื่อมต่อกับ-minio-notifications-amqp)  
-9. [Monitoring / Management / Logging](#8-monitoring--management--logging)  
-10. [Troubleshooting](#9-troubleshooting)  
-11. [สรุป](#10-สรุป)  
+9. [Security & Hardening สั้นๆ](#8-security--hardening-สั้นๆ)  
+10. [Monitoring / Logging](#9-monitoring--logging)  
+11. [Troubleshooting แบบรวบรัด](#10-troubleshooting-แบบรวบรัด)  
+12. [สรุป](#11-สรุป)  
 
 ---
 
@@ -26,35 +29,41 @@
 * สิทธิ์ `sudo`  
 * การเชื่อมต่อเครือข่ายภายใน (LAN)  
 * อินเทอร์เน็ตเพื่อดาวน์โหลดแพ็กเกจ  
-* (ถ้าจะ import definition พร้อม hash) เข้าถึง RabbitMQ Management UI เพื่อ export definitions  
+* (แนะนำ) มี `jq` ติดตั้งไว้ช่วย parse JSON เวลา debug:  
+  ```bash
+  sudo apt install -y jq
+  ```
 
----
-
-## 1. ติดตั้ง Erlang และ RabbitMQ
+## 1. ติดตั้ง Erlang และ RabbitMQ (แบบปลอดภัย)
 
 ```bash
-# อัพเดตระบบ
+# 1. แก้แพ็กเกจค้าง- broken ก่อน
+sudo apt --fix-broken install
+sudo apt-get update
+sudo apt-get upgrade -y
+
+# 2. เพิ่ม PPA ของทีม RabbitMQ เพื่อให้ได้ Erlang ล่าสุด (>=26)
+sudo add-apt-repository -y ppa:rabbitmq/rabbitmq-erlang
 sudo apt update
-sudo apt upgrade -y
 
-# ติดตั้ง dependencies
-sudo apt-get install -y curl gnupg apt-transport-https
+# 3. ติดตั้ง Erlang จาก PPA นี้ (จะได้ OTP 26+ ที่ rabbitmq-server ต้องการ) 
+sudo apt install -y erlang
 
-# เพิ่ม Erlang Solutions repository
-curl -fsSL https://packages.erlang-solutions.com/erlang-solutions_2.0_all.deb | sudo dpkg -i -
-sudo apt-get update
-sudo apt-get install -y erlang
+# ยืนยันเวอร์ชัน (ควรเห็น OTP 26 หรือ 27 ขึ้นไป)
+erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
 
-# เพิ่ม RabbitMQ repository และ key
-curl -fsSL https://keys.openpgp.org/vks/v1/by-fingerprint/0A9AF2115F4687BD29803A206B73A36E6026DFCA | sudo apt-key add -
-sudo tee /etc/apt/sources.list.d/rabbitmq.list <<EOF
-# RabbitMQ Stable
-deb https://dl.cloudsmith.io/public/rabbitmq/rabbitmq-server/deb/ubuntu $(lsb_release -cs) main
-EOF
+# 4. (ถ้ายังไม่ได้เพิ่ม RabbitMQ repo แบบ signed-by) เพิ่ม RabbitMQ official repo
+sudo mkdir -p /etc/apt/keyrings
+wget -O - https://dl.cloudsmith.io/public/rabbitmq/rabbitmq-server/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/rabbitmq-archive-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/rabbitmq-archive-keyring.gpg] https://dl.cloudsmith.io/public/rabbitmq/rabbitmq-server/deb/ubuntu $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/rabbitmq.list
+sudo apt update
 
-sudo apt-get update
-sudo apt-get install -y rabbitmq-server
-````
+# 5. ติดตั้ง RabbitMQ Server
+sudo apt install -y rabbitmq-server
+
+```
+
+> **หมายเหตุ:** การใช้ `apt-key add` แบบเก่าถูก deprecate แล้ว เลยใช้ `gpg --dearmor` แล้วอ้างอิงด้วย `signed-by` ให้ปลอดภัย
 
 ---
 
@@ -64,15 +73,19 @@ sudo apt-get install -y rabbitmq-server
 # เปิด Web UI (management)
 sudo rabbitmq-plugins enable rabbitmq_management
 
-# ให้สตาร์ทอัตโนมัติและเริ่ม
+# ตั้งให้สตาร์ทอัตโนมัติและเริ่ม
 sudo systemctl enable rabbitmq-server
 sudo systemctl start rabbitmq-server
+
+# ตรวจสถานะ
+sudo systemctl status rabbitmq-server
 ```
 
-* **Management UI:** `http://YOUR_SERVER_IP:15672` (default user/password: `guest`/`guest` ถ้าใช้ localhost เท่านั้น)
-* **AMQP Port:** 5672
+* **Management UI:** `http://<YOUR_SERVER_IP>:15672`
 
-> *หมายเหตุ:* ถ้าวางระบบจริงควรสร้าง user ใหม่และปิด `guest` access จาก network ภายนอก
+  * ค่าเริ่มต้น `guest`/`guest` **ใช้ได้เฉพาะจาก localhost เท่านั้น** ถ้าเปิดให้ remote ต้องสร้าง user ใหม่และปิด guest จาก remote access
+
+* **AMQP port:** 5672
 
 ---
 
@@ -80,87 +93,126 @@ sudo systemctl start rabbitmq-server
 
 ```bash
 sudo ufw allow 5672/tcp    # AMQP
-sudo ufw allow 15672/tcp   # Management UI
+sudo ufw allow 15672/tcp   # Management UI (ถ้าต้องเข้าจากภายนอก)
 sudo ufw reload
 ```
+
+ถ้าใช้ firewall อื่น (เช่น firewalld) ให้เปิดพอร์ตตามระบบนั้นแทน
 
 ---
 
 ## 4. สร้าง Virtual Host และ Users พร้อมสิทธิ์
 
-แยก user ตามบทบาทเพื่อจำกัดสิทธิ์:
-
 ```bash
 # สร้าง vhost
-sudo rabbitmqctl add_vhost /thermo
+sudo rabbitmqctl add_vhost thermo
 
-# สร้าง user สำหรับแต่ละ service
-sudo rabbitmqctl add_user ingestion_user strongP@ss1
-sudo rabbitmqctl add_user processing_user strongP@ss2
-sudo rabbitmqctl add_user ocr_user strongP@ss3
+# สร้าง user แยกตาม service (เปลี่ยนรหัสผ่านให้แข็งแรง)
+sudo rabbitmqctl add_user ingestion_user 'admin1234' 
+sudo rabbitmqctl add_user processing_user 'admin1234'
+sudo rabbitmqctl add_user ocr_user 'admin1234'
+sudo rabbitmqctl add_user minio_amqp_user 'admin1234'
 
-# กำหนด permissions บน vhost /thermo
-sudo rabbitmqctl set_permissions -p /thermo ingestion_user ".*" ".*" ".*"
-sudo rabbitmqctl set_permissions -p /thermo processing_user "" "processed.created" "raw.created"
-sudo rabbitmqctl set_permissions -p /thermo ocr_user "" "processed.created" "raw.created"
+# ตั้ง permissions
+# ingestion_user: full (publish/declare/etc)
+sudo rabbitmqctl set_permissions -p thermo ingestion_user ".*" ".*" ".*"
+
+# processing_user: อ่าน raw.created, เขียน processed.created
+sudo rabbitmqctl set_permissions -p thermo processing_user "" "processed.created" "raw.created"
+
+# ocr_user: อ่าน processed.created เท่านั้น
+sudo rabbitmqctl set_permissions -p thermo ocr_user "" "" "processed.created"
+
+# minio_amqp_user: ส่ง event (publish) บน raw.created และ processed.created
+sudo rabbitmqctl set_permissions -p thermo minio_amqp_user "" "raw.created|processed.created" ""
 ```
 
-> ปรับ `strongP@ss1` ฯลฯ ให้เป็นรหัสผ่านที่ปลอดภัยตามนโยบายองค์กร
+> แนะนำให้ใช้รหัสผ่านที่เกิดจาก password manager และไม่ hardcode ในสคริปต์ production
 
 ---
 
-## 5. สร้าง Exchange / Queues / Bindings
+## 5. ประกาศ Exchange / Queue / Binding
 
-### 5.1 ติดตั้ง `rabbitmqadmin` (ถ้ายังไม่มี)
+### 5.1 ติดตั้ง `rabbitmqadmin` (CLI ตัวช่วย)
 
 ```bash
-curl -O http://localhost:15672/cli/rabbitmqadmin
-chmod +x rabbitmqadmin
-sudo mv rabbitmqadmin /usr/local/bin/
+# ดาวน์โหลดจาก management UI endpoint (ปรับ host ถ้าไม่ใช่ localhost)
+# ดาวน์โหลด ไปไว้ /tmp
+curl -u guest:guest -o /tmp/rabbitmqadmin http://localhost:15672/cli/rabbitmqadmin
+
+# ถ้า curl ยังล้มเหลว ลอง wget
+wget --user=guest --password=guest -O /tmp/rabbitmqadmin http://localhost:15672/cli/rabbitmqadmin
+
+# ตรวจสอบว่าได้ไฟล์
+ls -l /tmp/rabbitmqadmin
+
+# ทำให้ executable
+chmod +x /tmp/rabbitmqadmin
+
+# ย้ายไปที่ที่ global ใช้ได้
+sudo mv /tmp/rabbitmqadmin /usr/local/bin/rabbitmqadmin
+
+# ตรวจสอบว่ารันได้
+rabbitmqadmin --version
+```
+### 5.2 ยืนยัน rabbitmq ที่มีอยู่
+
+```bash
+# ดู vhosts
+rabbitmqadmin list vhosts
+
+# ดู users
+rabbitmqadmin list users
+
+# ดู permissions (เฉพาะ /thermo)
+rabbitmqadmin -V /thermo list permissions
+
 ```
 
-### 5.2 สร้าง exchange, queue, binding
+### 5.3 สร้าง exchange, queue, binding
 
 ```bash
 # สร้าง direct exchange
-rabbitmqadmin --host=localhost --port=15672 --username=ingestion_user --password=strongP@ss1 --vhost=/thermo declare exchange name=thermo_exchange type=direct durable=true
+rabbitmqadmin --host=localhost --port=15672 --username=ingestion_user --password='admin1234' --vhost=/thermo declare exchange name=thermo_exchange type=direct durable=true
 
 # สร้าง queues
-rabbitmqadmin --vhost=/thermo --username=processing_user --password=strongP@ss2 declare queue name=raw_created durable=true
-rabbitmqadmin --vhost=/thermo --username=ocr_user --password=strongP@ss3 declare queue name=processed_created durable=true
+rabbitmqadmin --vhost=/thermo --username=processing_user --password='admin1234' declare queue name=raw_created durable=true
+rabbitmqadmin --vhost=/thermo --username=ocr_user --password='admin1234' declare queue name=processed_created durable=true
 
 # สร้าง bindings
-rabbitmqadmin --vhost=/thermo --username=processing_user --password=strongP@ss2 declare binding source=thermo_exchange destination=raw_created routing_key=raw.created
-rabbitmqadmin --vhost=/thermo --username=ocr_user --password=strongP@ss3 declare binding source=thermo_exchange destination=processed_created routing_key=processed.created
+rabbitmqadmin --vhost=/thermo --username=processing_user --password='admin1234' declare binding source=thermo_exchange destination=raw_created routing_key=raw.created
+rabbitmqadmin --vhost=/thermo --username=ocr_user --password='admin1234' declare binding source=thermo_exchange destination=processed_created routing_key=processed.created
 ```
 
-### 5.3 (สำรอง) สร้างผ่าน HTTP API ด้วย curl
+### 5.3 ตัวอย่างผ่าน HTTP API (curl)
 
 ```bash
 # Exchange
-curl -u ingestion_user:strongP@ss1 -XPUT \
+curl -u ingestion_user:'StrongP@ss1!' -XPUT \
   -H "content-type:application/json" \
   -d '{"type":"direct","durable":true}' \
   http://localhost:15672/api/exchanges/%2Fthermo/thermo_exchange
 
 # Queue raw_created
-curl -u processing_user:strongP@ss2 -XPUT \
-  http://localhost:15672/api/queues/%2Fthermo/raw_created \
-  -H "content-type:application/json" -d '{"durable":true}'
+curl -u processing_user:'StrongP@ss2!' -XPUT \
+  -H "content-type:application/json" \
+  -d '{"durable":true}' \
+  http://localhost:15672/api/queues/%2Fthermo/raw_created
 
 # Queue processed_created
-curl -u ocr_user:strongP@ss3 -XPUT \
-  http://localhost:15672/api/queues/%2Fthermo/processed_created \
-  -H "content-type:application/json" -d '{"durable":true}'
+curl -u ocr_user:'StrongP@ss3!' -XPUT \
+  -H "content-type:application/json" \
+  -d '{"durable":true}' \
+  http://localhost:15672/api/queues/%2Fthermo/processed_created
 
-# Binding raw.created -> raw_created
-curl -u processing_user:strongP@ss2 -XPOST \
+# Binding raw.created → raw_created
+curl -u processing_user:'StrongP@ss2!' -XPOST \
   -H "content-type:application/json" \
   -d '{"routing_key":"raw.created","arguments":{}}' \
   http://localhost:15672/api/bindings/%2Fthermo/e/thermo_exchange/q/raw_created
 
-# Binding processed.created -> processed_created
-curl -u ocr_user:strongP@ss3 -XPOST \
+# Binding processed.created → processed_created
+curl -u ocr_user:'StrongP@ss3!' -XPOST \
   -H "content-type:application/json" \
   -d '{"routing_key":"processed.created","arguments":{}}' \
   http://localhost:15672/api/bindings/%2Fthermo/e/thermo_exchange/q/processed_created
@@ -168,66 +220,137 @@ curl -u ocr_user:strongP@ss3 -XPOST \
 
 ---
 
-## 6. เตรียม `rabbitmq_definitions.json` ที่ import ได้
+## 6. เตรียม `rabbitmq_definitions.json` สำหรับ reuse (export/import)
 
-เพื่อให้นำการตั้งค่าทั้งหมดมาใช้ซ้ำได้ (ผ่าน Management UI → Import Definitions):
+### 6.1 Export (จาก UI)
 
-1. ก่อนอื่นให้ **export definitions** จากระบบที่ตั้งค่าสำเร็จ (เมนู Export Definitions) จะได้ไฟล์ที่มี `password_hash` จริงสำหรับ user
-2. ถ้าอยากสร้าง template แล้วนำมาเติมเอง ให้ใช้โครงสร้างตัวอย่างด้านล่าง **แต่ต้องแทนค่า `password_hash` ด้วย hash จริง** ที่ได้จาก export:
+เข้าไปที่ Management UI → **"Admin" → "Export definitions"** จะได้ไฟล์ JSON ที่มี `password_hash` จริง
+
+### 6.2 ตัวอย่างโครงสร้าง (ใช้เฉพาะถ้า export มาแล้วแล้วแก้ไข / สร้าง template ด้วย hash จริงจาก export)
+
+> **สำคัญ:** ต้องเอา `password_hash` ที่ได้จากการ export จริงมาใช้งาน ห้ามใส่ placeholder
 
 ```json
 {
-  "rabbit_version": "3.10.0",
+  "rabbit_version": "3.11.28",
+  "rabbitmq_version": "3.11.28",
+  "product_name": "RabbitMQ",
+  "product_version": "3.11.28",
+  "rabbitmq_definition_format": "cluster",
+  "original_cluster_name": "rabbit@temporary",
+  "explanation": "Bootstrap with thermo vhost/exchange/queues and role-based permissions",
+  "vhosts": [
+    { "name": "/" },
+    { "name": "thermo" }
+  ],
   "users": [
     {
-      "name": "ingestion_user",
-      "password_hash": "ACTUAL_HASH_FROM_EXPORT",
+      "name": "admin",
+      "password_hash": "nWAgZEnQ5VSZ14A6W8zSx0q3un0K6nhJDMqh7xTc+3lvEK7D",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
-      "tags": ""
+      "tags": ["administrator"],
+      "limits": {}
+    },
+    {
+      "name": "ingestion_user",
+      "password_hash": "nWAgZEnQ5VSZ14A6W8zSx0q3un0K6nhJDMqh7xTc+3lvEK7D",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": [],
+      "limits": {}
+    },
+    {
+      "name": "minio_amqp_user",
+      "password_hash": "nWAgZEnQ5VSZ14A6W8zSx0q3un0K6nhJDMqh7xTc+3lvEK7D",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": [],
+      "limits": {}
     },
     {
       "name": "processing_user",
-      "password_hash": "ACTUAL_HASH_FROM_EXPORT",
+      "password_hash": "nWAgZEnQ5VSZ14A6W8zSx0q3un0K6nhJDMqh7xTc+3lvEK7D",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
-      "tags": ""
+      "tags": [],
+      "limits": {}
     },
     {
       "name": "ocr_user",
-      "password_hash": "ACTUAL_HASH_FROM_EXPORT",
+      "password_hash": "nWAgZEnQ5VSZ14A6W8zSx0q3un0K6nhJDMqh7xTc+3lvEK7D",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
-      "tags": ""
+      "tags": [],
+      "limits": {}
     }
-  ],
-  "vhosts": [
-    { "name": "/thermo" }
   ],
   "permissions": [
     {
+      "user": "admin",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "admin",
+      "vhost": "thermo",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
       "user": "ingestion_user",
-      "vhost": "/thermo",
+      "vhost": "thermo",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
+      "user": "minio_amqp_user",
+      "vhost": "thermo",
       "configure": ".*",
       "write": ".*",
       "read": ".*"
     },
     {
       "user": "processing_user",
-      "vhost": "/thermo",
+      "vhost": "thermo",
       "configure": "",
-      "write": "processed.created",
-      "read": "raw.created"
+      "write": "processed_created",
+      "read": "raw_created"
     },
     {
       "user": "ocr_user",
-      "vhost": "/thermo",
+      "vhost": "thermo",
       "configure": "",
-      "write": "processed.created",
-      "read": "raw.created"
+      "write": "",
+      "read": "processed_created"
+    }
+  ],
+  "topic_permissions": [],
+  "parameters": [],
+  "global_parameters": [
+    { "name": "cluster_tags", "value": [] },
+    { "name": "internal_cluster_id", "value": "rabbitmq-cluster-id-UWQcAdunnmpIJ8O6gm1gLA" }
+  ],
+  "policies": [],
+  "queues": [
+    {
+      "name": "raw_created",
+      "vhost": "thermo",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "processed_created",
+      "vhost": "thermo",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
     }
   ],
   "exchanges": [
     {
       "name": "thermo_exchange",
-      "vhost": "/thermo",
+      "vhost": "thermo",
       "type": "direct",
       "durable": true,
       "auto_delete": false,
@@ -235,26 +358,10 @@ curl -u ocr_user:strongP@ss3 -XPOST \
       "arguments": {}
     }
   ],
-  "queues": [
-    {
-      "name": "raw_created",
-      "vhost": "/thermo",
-      "durable": true,
-      "auto_delete": false,
-      "arguments": {}
-    },
-    {
-      "name": "processed_created",
-      "vhost": "/thermo",
-      "durable": true,
-      "auto_delete": false,
-      "arguments": {}
-    }
-  ],
   "bindings": [
     {
       "source": "thermo_exchange",
-      "vhost": "/thermo",
+      "vhost": "thermo",
       "destination": "raw_created",
       "destination_type": "queue",
       "routing_key": "raw.created",
@@ -262,7 +369,7 @@ curl -u ocr_user:strongP@ss3 -XPOST \
     },
     {
       "source": "thermo_exchange",
-      "vhost": "/thermo",
+      "vhost": "thermo",
       "destination": "processed_created",
       "destination_type": "queue",
       "routing_key": "processed.created",
@@ -270,73 +377,160 @@ curl -u ocr_user:strongP@ss3 -XPOST \
     }
   ]
 }
+
+
+
 ```
 
-> **ห้ามใช้คำว่า `"PLACEHOLDER"` ใน `password_hash`** — ต้องได้ค่าจากการ export จริงเท่านั้น
+### 6.3 Import
+
+ใน UI: ไปที่ Management UI → **"Admin" → "Import definitions"** อัพโหลดไฟล์ JSON ที่เตรียมไว้
 
 ---
 
 ## 7. เชื่อมต่อกับ MinIO Notifications (AMQP)
 
-ตั้งค่าให้ MinIO ส่ง event เข้า RabbitMQ ตาม workflow:
+แนะนำให้ใช้ user แยกสำหรับ MinIO (เช่น `minio_amqp_user`) และจำกัด permission ให้ตรงงาน
 
 ```bash
-# raw bucket -> raw_created
-mc event add local/thermo-raw \
-  arn:minio:sqs::1:amqp --event put --suffix .jpg \
-  --amqp-exchange thermo_exchange \
-  --amqp-queue raw_created \
-  --amqp-routing-key raw.created \
-  --amqp-username ingestion_user \
-  --amqp-password strongP@ss1 \
-  --amqp-vhost /thermo \
-  --amqp-uri "amqp://localhost:5672/"
+# ตัวอย่างเพิ่ม event (raw bucket)
+mc admin config set local/ notify_amqp:raw enable=on
+mc admin config set local/ notify_amqp:raw url="amqp://minio_amqp_user:admin1234@localhost:5672/thermo"
+mc admin config set local/ notify_amqp:raw exchange=thermo_exchange
+mc admin config set local/ notify_amqp:raw exchange_type=direct
+mc admin config set local/ notify_amqp:raw routing_key=raw.created
+mc admin config set local/ notify_amqp:raw durable=true
+mc admin config set local/ notify_amqp:raw ack_level=broker
+mc admin config set local/ notify_amqp:raw delivery_mode=2
+mc admin config set local/ notify_amqp:raw publisher_confirms=on
 
-# processed bucket -> processed_created
-mc event add local/thermo-processed \
-  arn:minio:sqs::1:amqp --event put --suffix .jpg \
-  --amqp-exchange thermo_exchange \
-  --amqp-queue processed_created \
-  --amqp-routing-key processed.created \
-  --amqp-username ingestion_user \
-  --amqp-password strongP@ss1 \
-  --amqp-vhost /thermo \
-  --amqp-uri "amqp://localhost:5672/"
+# ตัวอย่างเพิ่ม event (processed bucket)
+mc admin config set local/ notify_amqp:processed enable=on
+mc admin config set local/ notify_amqp:processed url="amqp://minio_amqp_user:admin1234@localhost:5672/thermo"
+mc admin config set local/ notify_amqp:processed exchange=thermo_exchange
+mc admin config set local/ notify_amqp:processed exchange_type=direct
+mc admin config set local/ notify_amqp:processed routing_key=processed.created
+mc admin config set local/ notify_amqp:processed durable=true
+mc admin config set local/ notify_amqp:processed ack_level=broker
+mc admin config set local/ notify_amqp:processed delivery_mode=2
+mc admin config set local/ notify_amqp:processed publisher_confirms=on
+
+# รีสตาร์ท MinIO:
+mc admin service restart local
+
+# ตรวจผล
+mc admin config get local notify_amqp
+
+```
+หากพบปัญหาให้ทำการหยุดการทำงาน
+```bash
+# รีเซ็ตให้ clean ก่อน
+mc admin config set local/ notify_amqp:raw enable=off
+mc admin config set local/ notify_amqp:processed enable=off
+mc admin service restart local
 ```
 
-> แนะนำให้สร้าง user แยกสำหรับ MinIO ถ้าต้องการแยกสิทธิ์ (เช่น `minio_amqp_user`) แล้วให้ permissions เหมาะสม
+> ถ้าใช้ `ingestion_user` เป็นผู้ส่ง event ก็ปรับชื่อ user และ permission ให้เหมาะสม แต่แยกก็ช่วยเรื่อง audit และ principle of least privilege
 
 ---
 
-## 8. Monitoring / Management / Logging
+## 8. ผูก bucket กับ AMQP ARN
+```bash
+# ดู log ของ MinIO บน startup เพื่อหา ARN ที่แท้จริง
+journalctl -u minio -f | head -n 100
+## ตัวอย่าง Aug 01 13:31:42 qiadmin-server minio[16138]: SQS ARNs: arn:minio:sqs::processed:amqp arn:minio:sqs::raw:amqp
 
-* **Management UI:** `http://YOUR_SERVER_IP:15672`
-* **Logs:** ดูได้จาก `journalctl -u rabbitmq-server -f` หรือที่ `/var/log/rabbitmq/`
-* **Metrics (optional):** ใช้ `rabbitmq_exporter` ร่วมกับ Prometheus
+# ให้ bucket raw ส่ง event เมื่อมีการ put .jpg ผ่าน AMQP endpoint "raw"
+mc event add local/thermo-raw arn:minio:sqs::raw:amqp --event put --suffix .jpg
+
+# ให้ bucket processed ส่ง event เมื่อมีการ put .jpg ผ่าน AMQP endpoint "processed"
+mc event add local/thermo-processed arn:minio:sqs::processed:amqp --event put --suffix .jpg
+
+```
+## 9. ทดสอบการ upload
+```bash
+# สร้าง dummy JPEG (แค่ไฟล์ไบต์สุ่มมี .jpg extension)
+dd if=/dev/urandom bs=1024 count=1 of=/tmp/test.jpg
+# หรือแค่สร้างไฟล์เปล่า (ไม่สำคัญว่ามันจะไม่ใช่ภาพจริง)
+touch /tmp/test.jpg
+# เอาไฟล์ไปใส่ใน bucket เพื่อ trigger event
+mc cp /tmp/test.jpg local/thermo-raw/
+#ตรวจว่า notification ถูกติดตั้ง (เช็คว่า event binding อยู่)
+mc event ls local/thermo-raw arn:minio:sqs::raw:amqp
+#ดูว่า message ไปถึง queue หรือยัง
+rabbitmqadmin --vhost=thermo --username=processing_user --password='admin1234' get queue=raw_created requeue=false
+
+```
+
+## 10. กำหนดสิทธิ์ในการเข้าดู
+```bash
+sudo rabbitmqctl set_user_tags ingestion_user administrator
+rabbitmqctl list_users
+```
+
+## 10. Security & Hardening (สั้นๆ)
+
+* **ปิด `guest` จากการเข้าจาก network ภายนอก** (ค่า default ใช้ได้เฉพาะ localhost)
+
+  ```bash
+  # ถ้าอยากลบ guest เลย (ระวัง dependencies)
+  sudo rabbitmqctl delete_user guest
+  ```
+* **ใช้ user แยกตาม service** (ทำแล้ว)
+* **เปิด TLS สำหรับ production** (ไม่รวมใน README นี้ แต่ควรทำ)
+* **จำกัดการเข้าถึง Management UI ผ่าน firewall หรือ reverse-proxy ที่มี auth ชั้นเพิ่ม**
+* **เปลี่ยน default password ทันทีหลังติดตั้ง**
+* **ตั้งค่า password policy / rotate เป็นระยะ**
 
 ---
 
-## 9. Troubleshooting
+## 11. Monitoring / Logging
 
-| ปัญหา                          | สาเหตุที่เป็นไปได้               | วิธีแก้                                                                    |
-| ------------------------------ | -------------------------------- | -------------------------------------------------------------------------- |
-| เชื่อมต่อ AMQP ไม่ได้          | ผู้ใช้/รหัสผ่านผิด, vhost ไม่ตรง | ตรวจ `rabbitmqctl list_users`, `rabbitmqctl list_vhosts`, ตรวจ permissions |
-| ไม่เห็น exchange/queue         | ยังไม่ได้ประกาศ หรือชื่อผิด      | ตรวจผ่าน Management UI หรือ `rabbitmqadmin list exchanges`                 |
-| message ไม่ไปที่ queue         | binding หรือ routing key ผิด     | ตรวจ binding กับ routing\_key ว่าตรงกัน                                    |
-| authentication ล้มเหลว         | user ไม่มีสิทธิ์บน vhost         | รัน `rabbitmqctl list_permissions -p /thermo`                              |
-| definition import แล้วไม่ทำงาน | `password_hash` ไม่ใช่ hash จริง | export ใหม่จาก UI แล้วใช้ไฟล์ที่ได้                                        |
+* ดู log แบบ realtime:
+
+  ```bash
+  journalctl -u rabbitmq-server -f
+  ```
+* ไฟล์ log เพิ่มเติมอยู่ที่: `/var/log/rabbitmq/`
+* Metrics:
+
+  * ใช้ `rabbitmq_exporter` ร่วมกับ Prometheus แล้วดึงไป Grafana (ถ้าต้องการ dashboard)
+* Health check อย่างง่าย:
+
+  ```bash
+  rabbitmqctl status
+  ```
 
 ---
 
-## 10. สรุป
+## 12. Troubleshooting แบบรวบรัด
 
-คุณได้ติดตั้ง RabbitMQ, สร้าง vhost `/thermo`, users แยกตาม service, กำหนด permissions, ประกาศ exchange/queue/bindings, เตรียม definition สำหรับ reuse, และเชื่อมต่อกับ MinIO เพื่อให้ event-driven pipeline (raw\.created → processing → processed.created → OCR) ทำงานตามที่ออกแบบไว้ในโครงการ ThermoSense ได้ครบถ้วน
+| ปัญหา                          | สาเหตุที่เป็นไปได้                               | แก้ไข                                                                                    |
+| ------------------------------ | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| ไม่สามารถ authenticate ได้     | รหัสผ่าน/username ผิด, permission ไม่พอ          | `rabbitmqctl list_users`; `rabbitmqctl list_permissions -p /thermo`                      |
+| ไม่เห็น exchange/queue         | ยังไม่ได้ประกาศ หรือตัวสะกดผิด                   | เช็คผ่าน Management UI หรือ `rabbitmqadmin list exchanges` / `rabbitmqadmin list queues` |
+| Message ไม่ไหลเข้า queue       | binding, routing key ผิด                         | ตรวจ binding ผ่าน API หรือ UI; เปรียบเทียบ routing\_key                                  |
+| Definition import แล้วไม่ทำงาน | `password_hash` ไม่ถูกต้อง                       | export ใหม่จาก UI แล้วใช้ hash จริง                                                      |
+| MinIO ไม่ส่ง event             | การตั้งค่า AMQP ของ MinIO ผิด / user ไม่มีสิทธิ์ | ตรวจ log ของ MinIO, ตรวจว่า `minio_amqp_user` มี permission ใน RabbitMQ                  |
+
+---
+
+## 13. สรุป
+
+คุณจะได้ระบบ RabbitMQ แบบ standalone ที่:
+
+* ติดตั้ง Erlang + RabbitMQ ในวิธีที่ปลอดภัยทันสมัย
+* มี vhost `/thermo` แยกความรับผิดชอบ
+* มี user แยกตาม service และแยกสำหรับ MinIO
+* ประกาศ `exchange`, `queue`, `binding` ตามฟลูว์ `raw.created` → `processed.created`
+* สามารถ export/import definition เพื่อ reuse/replicate
+* เชื่อมต่อกับ MinIO ผ่าน AMQP notification เพื่อขับเคลื่อน pipeline ของ ThermoSense
+* มีแนวทาง security ขั้นต้นและ monitoring
 
 ---
 
 ## อ้างอิง
 
-* RabbitMQ Documentation: [https://www.rabbitmq.com](https://www.rabbitmq.com)
-* RabbitMQ Management HTTP API: [https://rawcdn.githack.com/rabbitmq/rabbitmq-management/v3.10.0/priv/www/api/index.html](https://rawcdn.githack.com/rabbitmq/rabbitmq-management/v3.10.0/priv/www/api/index.html)
-* MinIO AMQP Notification: [https://docs.min.io/docs/minio-legacy-amqp-notification-guide.html](https://docs.min.io/docs/minio-legacy-amqp-notification-guide.html)
-
+* RabbitMQ Official Docs
+* RabbitMQ Management HTTP API
+* MinIO AMQP Notification Guide

@@ -1,19 +1,21 @@
-// services/economic-service/src/utils/dataSource.ts
+// service\watcher-service\src\utils\dataSource.ts
 import 'reflect-metadata';
-import { DataSource } from 'typeorm';
+import { DataSource, DataSourceOptions } from 'typeorm';
 import * as dotenv from 'dotenv';
 import { resolve } from 'path';
 import fs from 'fs';
-import { ImageObject } from '../models/imageObjects.model';
-import { Device } from '../models/devices.model'; // ต้องมีไฟล์นี้ด้วย
+import { ImageObject } from '../models/objectRecord.model';
+import { Device } from '../models/devices.model';
 
-// โหลด .env (fallback ไปที่ project root)
+// โหลด .env (fallback ไปที่ project root) แต่ไม่ exit ถ้าไม่เจอ — ใช้ env vars แทน
 const envPath = process.env.ENV_PATH || resolve(__dirname, '../../../../.env');
-if (!fs.existsSync(envPath)) {
-  console.error(`❌ .env file not found at path: ${envPath}`);
-  process.exit(1);
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+} else {
+  if (process.env.NODE_ENV !== 'production') {
+    console.warn(`⚠️ .env file not found at path: ${envPath}, falling back to environment variables`);
+  }
 }
-dotenv.config({ path: envPath });
 
 // ดึงค่าจาก env
 const DB_HOST = process.env.DB_HOST || '127.0.0.1';
@@ -26,7 +28,7 @@ const DATABASE_URL = process.env.DATABASE_URL || '';
 
 // debug (เฉพาะ non-production)
 if (process.env.NODE_ENV !== 'production') {
-  console.log('🛠 IngestionService DataSource env resolution:');
+  console.log('🛠 DataSource env resolution:');
   console.log('  .env path:', envPath);
   console.log('  DB_HOST:', DB_HOST);
   console.log('  DB_PORT:', DB_PORT);
@@ -37,7 +39,7 @@ if (process.env.NODE_ENV !== 'production') {
   console.log('  DATABASE_URL provided:', !!process.env.DATABASE_URL);
 }
 
-// validation
+// validation (ถ้าไม่มี DATABASE_URL ต้องมี user/password)
 if (!DATABASE_URL) {
   if (!DB_USER) {
     console.error('❌ Missing DB_USER and no DATABASE_URL provided.');
@@ -49,23 +51,36 @@ if (!DATABASE_URL) {
   }
 }
 
-const options: any = {
+const baseEntities = [Device, ImageObject];
+
+const common: Partial<DataSourceOptions> = {
   type: 'postgres',
   synchronize: false,
   logging: false,
-  entities: [Device, ImageObject],
+  entities: baseEntities,
 };
 
+let options: DataSourceOptions;
+
 if (DATABASE_URL) {
-  options.url = DATABASE_URL;
-  options.extra = { options: `-csearch_path=${SCHEMA_NAME}` };
+  options = {
+    ...common,
+    // @ts-ignore because url is allowed when DATABASE_URL is present
+    url: DATABASE_URL,
+    extra: {
+      options: `-c search_path=${SCHEMA_NAME}`,
+    },
+  } as DataSourceOptions;
 } else {
-  options.host = DB_HOST;
-  options.port = DB_PORT;
-  options.username = DB_USER;
-  options.password = DB_PASSWORD;
-  options.database = DB_NAME;
-  options.schema = SCHEMA_NAME;
+  options = {
+    ...common,
+    host: DB_HOST,
+    port: DB_PORT,
+    username: DB_USER,
+    password: DB_PASSWORD,
+    database: DB_NAME,
+    schema: SCHEMA_NAME,
+  } as DataSourceOptions;
 }
 
 export const AppDataSource = new DataSource(options);

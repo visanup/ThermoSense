@@ -1,4 +1,5 @@
-// services/economic-service/src/models/devices.model.ts
+// service\watcher-service\src\models\devices.model.ts
+
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -7,7 +8,7 @@ import {
   UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
-import { ImageObject } from './imageObjects.model';
+import { ImageObject } from './objectRecord.model';
 
 @Entity({ schema: 'thermo', name: 'devices' })
 export class Device {
@@ -38,4 +39,5 @@ export class Device {
   @OneToMany(() => ImageObject, (img) => img.device)
   image_objects!: ImageObject[];
 }
+
 

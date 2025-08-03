@@ -1,56 +1,61 @@
 // services/auth-service/src/utils/swagger.ts
+// services/data-service/src/utils/swagger.ts
+import { resolve } from 'path';
+import swaggerJSDoc from 'swagger-jsdoc';
 import { PORT } from '../configs/config';
-/**
- * Configuration object for swagger-jsdoc.
- * We define our own minimal type here to avoid issues importing
- * the `Options` type from 'swagger-jsdoc'.
- */
-interface SwaggerJsdocOptions {
-  definition: {
-    openapi: string;
-    info: {
-      title: string;
-      version: string;
-      description: string;
-    };
-    servers: { url: string; description?: string }[];
-    components?: Record<string, any>;
-    security?: Array<Record<string, any>>;
-  };
-  apis: string[];
+
+const isProd = process.env.NODE_ENV === 'production';
+
+function getApiGlobs(): string[] {
+  if (isProd) {
+    return [resolve(__dirname, '../../dist/routes/**/*.js')];
+  } else {
+    return [resolve(__dirname, '../../src/routes/**/*.ts')];
+  }
 }
 
-export const swaggerOptions: SwaggerJsdocOptions = {
-  definition: {
-    openapi: '3.0.0',
-    info: {
-      title: 'Data Service API',
-      version: '1.0.0',
-      description: 'Authentication & Authorization endpoints',
+export function getSwaggerSpec(overrideServerUrl?: string) {
+  const servers = [
+    {
+      url: overrideServerUrl || process.env.BASE_URL || `http://localhost:${PORT}`,
+      description: 'API server',
     },
-    servers: [
-      {
-        // will be overridden dynamically in server.ts to use the real PORT
-        url: `http://localhost:${PORT}`,
-        description: 'Local dev server',
+  ];
+
+  const options = {
+    definition: {
+      openapi: '3.0.0',
+      info: {
+        title: 'Data Service API',
+        version: '1.0.0',
+        description: 'Data service endpoints',
       },
-    ],
-    components: {
-      securitySchemes: {
-        bearerAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
-          description: 'JWT Authorization header using the Bearer scheme. Enter only the token, without Bearer prefix.'
+      servers,
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+            description:
+              'JWT Authorization header using the Bearer scheme. Provide only the token, without the "Bearer" prefix.',
+          },
         },
       },
+      security: [{ bearerAuth: [] }],
     },
-    security: [{ bearerAuth: [] }],
-  },
-  apis: [
-    // adjust paths to match your project structure
-    './src/routes/**/*.ts',
-    './src/models/**/*.ts',
-  ],
-};
+    apis: getApiGlobs(),
+  };
+
+  // swaggerJSDoc returns a plain object; cast so we can safely inspect .paths
+  const spec = swaggerJSDoc(options as any) as { paths?: Record<string, unknown> };
+
+  console.log('[Swagger] using globs:', getApiGlobs());
+  console.log('[Swagger] generated path keys:', spec.paths ? Object.keys(spec.paths) : []);
+
+  return spec;
+}
+
+
+
 

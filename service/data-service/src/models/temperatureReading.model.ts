@@ -1,4 +1,4 @@
-// src/models/temperatureReading.model.ts
+// --- File: src/models/temperatureReading.model.ts ---
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -10,9 +10,10 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Device } from './devices.model';
+import { ImageObject } from './imageObject.model';
 
 @Entity({ schema: 'thermo', name: 'temperature_readings' })
-@Index(['device', 'recorded_at'])
+@Index(['device', 'recorded_at'], { unique: true })
 export class TemperatureReading {
   @PrimaryGeneratedColumn('increment')
   id!: number;
@@ -25,13 +26,15 @@ export class TemperatureReading {
   recorded_at!: Date;
 
   @Column({ type: 'numeric', precision: 6, scale: 3 })
-  temperature!: string; // keep as string to preserve precision; convert in business logic if needed
+  temperature!: string; // stored as string to preserve precision
 
-  @Column({ type: 'bigint', nullable: true })
-  raw_image_id?: number;
+  @ManyToOne(() => ImageObject, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'raw_image_id' })
+  raw_image?: ImageObject;
 
-  @Column({ type: 'bigint', nullable: true })
-  processed_image_id?: number;
+  @ManyToOne(() => ImageObject, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'processed_image_id' })
+  processed_image?: ImageObject;
 
   @CreateDateColumn({ type: 'timestamptz' })
   created_at!: Date;

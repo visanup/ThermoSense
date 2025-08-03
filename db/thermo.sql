@@ -1,9 +1,10 @@
--- extension ถ้าใช้ UUID ที่อื่น
+-- Extension for UUID if needed elsewhere (not used in current tables but kept for future use)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- schema + reusable updater
+-- Schema
 CREATE SCHEMA IF NOT EXISTS thermo;
 
+-- reusable trigger/updater for updated_at
 CREATE OR REPLACE FUNCTION thermo.update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -27,7 +28,7 @@ CREATE TRIGGER trig_update_devices_updated_at
   BEFORE UPDATE ON thermo.devices
   FOR EACH ROW EXECUTE FUNCTION thermo.update_updated_at_column();
 
--- Status enum for image objects
+-- Status enum for image objects (idempotent)
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'object_status') THEN
@@ -36,7 +37,7 @@ BEGIN
 END
 $$;
 
--- Image objects (สั้นแต่มีกลไกสำคัญ)
+-- Image objects
 CREATE TABLE IF NOT EXISTS thermo.image_objects (
   id             BIGSERIAL PRIMARY KEY,
   device_id      INTEGER NOT NULL REFERENCES thermo.devices(id) ON DELETE CASCADE,
@@ -52,7 +53,7 @@ CREATE TABLE IF NOT EXISTS thermo.image_objects (
   updated_at     TIMESTAMPTZ DEFAULT NOW() NOT NULL,
   CONSTRAINT uq_minio_object UNIQUE (minio_bucket, object_name)
 );
--- indexes
+-- indexes for image_objects
 CREATE INDEX IF NOT EXISTS idx_image_objects_device_time ON thermo.image_objects(device_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_image_objects_status ON thermo.image_objects(status);
 CREATE TRIGGER trig_update_image_objects_updated_at
@@ -108,6 +109,6 @@ CREATE TRIGGER trig_validate_reading_images
   BEFORE INSERT OR UPDATE ON thermo.temperature_readings
   FOR EACH ROW EXECUTE FUNCTION thermo.validate_reading_image_types();
 
--- Index for readings
+-- Index for readings (already covered partly by unique constraint but helpful for ordering)
 CREATE INDEX IF NOT EXISTS idx_readings_device_time
   ON thermo.temperature_readings(device_id, recorded_at DESC);

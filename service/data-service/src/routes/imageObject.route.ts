@@ -1,10 +1,10 @@
-// File: service/data-service/src/routes/devices.route.ts
-// --- corrected devices.route.ts ---
+// File: service/data-service/src/routes/imageObject.route.ts
 import { Router, Request, Response } from 'express';
-import { DevicesService } from '../services/devices.service';
+import { ImageObjectService } from '../services/imageObject.service';
 
 const router = Router();
-const service = new DevicesService();
+const service = new ImageObjectService();
+
 
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -18,9 +18,9 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const device = await service.getById(id);
-    if (!device) return res.status(404).json({ error: 'Device not found' });
-    res.json(device);
+    const obj = await service.getById(id);
+    if (!obj) return res.status(404).json({ error: 'ImageObject not found' });
+    res.json(obj);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -35,7 +35,6 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(400).json({ error: err.message });
   }
 });
-
 
 router.put('/:id', async (req: Request, res: Response) => {
   try {

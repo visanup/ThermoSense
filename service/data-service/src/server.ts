@@ -1,79 +1,72 @@
 // services/data-service/src/server.ts
-
 import 'reflect-metadata';
-import express, { Application, Request, Response, RequestHandler } from 'express';
+import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-
-// โหลด swagger-ui-express ด้วย require แล้ว cast type ให้ตรงกับ express ของเรา
-const swaggerUiModule = require('swagger-ui-express') as {
-  serve: RequestHandler[];
-  setup: (swaggerDoc: any, opts?: any) => RequestHandler;
-};
-
-// โหลด swagger-jsdoc ด้วย require เพื่อไม่ต้องรอ types
-const swaggerJSDoc = require('swagger-jsdoc');
 
 import { AppDataSource } from './utils/dataSource';
 import routes from './routes';
 import { authenticateToken } from './middlewares/auth';
 import { errorHandler } from './middlewares/errorHandler';
 import { PORT } from './configs/config';
-import { swaggerOptions } from './utils/swagger';
 
 async function startServer() {
   try {
-    // 1) Initialize DB connection
+    // Global safety handlers
+    process.on('unhandledRejection', (reason) => {
+      console.error('Unhandled Rejection:', reason);
+    });
+    process.on('uncaughtException', (err) => {
+      console.error('Uncaught Exception:', err);
+    });
+
+    // Initialize DB
     await AppDataSource.initialize();
     console.log('✅ DataSource has been initialized');
 
     const app: Application = express();
+    app.set('trust proxy', true);
 
-    // 2) Security & logging middleware
+    // Middleware
     app.use(helmet());
-    app.use(cors());
+    app.use(
+      cors({
+        origin:
+          process.env.CORS_ALLOWED_ORIGINS === '*'
+            ? true
+            : process.env.CORS_ALLOWED_ORIGINS
+            ? process.env.CORS_ALLOWED_ORIGINS.split(',')
+            : undefined,
+        credentials: process.env.CORS_ALLOW_CREDENTIALS === 'true',
+        methods: process.env.CORS_ALLOW_METHODS
+          ? process.env.CORS_ALLOW_METHODS.split(',')
+          : undefined,
+        allowedHeaders: process.env.CORS_ALLOW_HEADERS
+          ? process.env.CORS_ALLOW_HEADERS.split(',')
+          : undefined,
+      })
+    );
     app.use(morgan('combined'));
-    app.use(express.json());
+    app.use(express.json({ limit: '1mb' }));
 
-    // 3) Health-check endpoint
+    // Health
     app.get('/health', (_req: Request, res: Response) => {
       res.sendStatus(200);
     });
 
-    // --- Dynamic Swagger setup ---
-    const opts = {
-      ...swaggerOptions,
-      definition: {
-        ...swaggerOptions.definition,
-        servers: [
-          {
-            url: `http://localhost:${PORT}`,
-            description: 'Local dev server',
-          },
-        ],
-      },
-    };
-    const swaggerSpec = swaggerJSDoc(opts);
-
-    // Serve Swagger UI at /api-docs
-    const serveHandlers: RequestHandler[] = swaggerUiModule.serve;
-    const setupHandler: RequestHandler = swaggerUiModule.setup(swaggerSpec, { explorer: true });
-    app.use('/api-docs', ...serveHandlers, setupHandler);
-
-    // 5) Protected routes
+    // Protected API
     app.use('/api', authenticateToken, routes);
 
-    // 6) Global error handler
+    // Error handler
     app.use(errorHandler);
 
-    // 7) Start server
+    // Start
     const server = app.listen(PORT, () => {
       console.log(`🚀 Server is running on http://localhost:${PORT}`);
-      console.log(`📖 Swagger UI available at http://localhost:${PORT}/api-docs`);
     });
 
-    // 8) Graceful shutdown
+    // Graceful shutdown
     const shutdown = () => {
       console.log('⚡️ Shutting down server...');
       server.close(async () => {
@@ -84,9 +77,8 @@ async function startServer() {
     };
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
-
   } catch (err) {
-    console.error('❌ Error during DataSource initialization:', err);
+    console.error('❌ Error during startup:', err);
     process.exit(1);
   }
 }

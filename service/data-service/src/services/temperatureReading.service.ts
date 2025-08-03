@@ -1,73 +1,70 @@
 // src/services/temperatureReading.service.ts
-import { AppDataSource } from '../utils/dataSource';
+import { Repository, DeepPartial } from 'typeorm';
 import { TemperatureReading } from '../models/temperatureReading.model';
+import { AppDataSource } from '../utils/dataSource';
+import { ImageObject } from '../models/imageObject.model';
 import { Device } from '../models/devices.model';
 
-interface CreateReadingPayload {
-  device_uid: string;
-  recorded_at: Date;
-  temperature: string;
-  raw_image_id?: number;
-  processed_image_id?: number;
-}
-
 export class TemperatureReadingService {
-  private repo = AppDataSource.getRepository(TemperatureReading);
+  private repo: Repository<TemperatureReading>;
+  private imageRepo = AppDataSource.getRepository(ImageObject);
   private deviceRepo = AppDataSource.getRepository(Device);
 
-  async create(payload: CreateReadingPayload): Promise<TemperatureReading> {
-    const device = await this.deviceRepo.findOne({ where: { device_uid: payload.device_uid } });
-    if (!device) throw new Error('device not found');
+  constructor() {
+    this.repo = AppDataSource.getRepository(TemperatureReading);
+  }
 
-    // สร้างและเซฟในขั้นตอนเดียว (ไม่ต้องใช้ repo.create แยกก็ได้)
-    const tr = await this.repo.save({
-      device: device,
-      recorded_at: payload.recorded_at,
-      temperature: payload.temperature,
-      raw_image_id: payload.raw_image_id,
-      processed_image_id: payload.processed_image_id,
-    } as Partial<TemperatureReading>); // casting ระดับเบาๆ เพื่อให้ TypeORM รับได้
-
-    return tr;
+  async list(): Promise<TemperatureReading[]> {
+    return this.repo.find({ relations: ['device', 'raw_image', 'processed_image'] });
   }
 
   async getById(id: number): Promise<TemperatureReading | null> {
-    return await this.repo.findOne({
-      where: { id },
-      relations: ['device'],
-    });
+    return this.repo.findOne({ where: { id }, relations: ['device', 'raw_image', 'processed_image'] });
   }
 
-  async list(
-    device_uid?: string,
-    limit = 50,
-    offset = 0
-  ): Promise<TemperatureReading[]> {
-    const qb = this.repo
-      .createQueryBuilder('tr')
-      .leftJoinAndSelect('tr.device', 'device')
-      .orderBy('tr.recorded_at', 'DESC')
-      .take(limit)
-      .skip(offset);
-
-    if (device_uid) {
-      qb.andWhere('device.device_uid = :uid', { uid: device_uid });
+  async create(data: DeepPartial<TemperatureReading>): Promise<TemperatureReading> {
+    // Resolve device relation if passed as device_id
+    if ((data as any).device_id) {
+      const device = await this.deviceRepo.findOne({ where: { id: (data as any).device_id } });
+      if (!device) throw new Error('Device not found');
+      (data as any).device = device;
+      delete (data as any).device_id;
     }
 
-    return await qb.getMany();
+    // Resolve raw_image relation
+    if ((data as any).raw_image_id) {
+      const raw = await this.imageRepo.findOne({ where: { id: (data as any).raw_image_id } });
+      if (!raw) throw new Error('Raw image not found');
+      (data as any).raw_image = raw;
+      delete (data as any).raw_image_id;
+    }
+
+    // Resolve processed_image relation
+    if ((data as any).processed_image_id) {
+      const proc = await this.imageRepo.findOne({ where: { id: (data as any).processed_image_id } });
+      if (!proc) throw new Error('Processed image not found');
+      (data as any).processed_image = proc;
+      delete (data as any).processed_image_id;
+    }
+
+    // Create and ensure it's a single entity, not array
+    const readingRaw = this.repo.create(data as any);
+    if (Array.isArray(readingRaw)) {
+      throw new Error('Expected single TemperatureReading, got array');
+    }
+    const reading = readingRaw as TemperatureReading;
+
+    return this.repo.save(reading);
   }
 
-  async update(id: number, updates: Partial<TemperatureReading>): Promise<TemperatureReading | null> {
-    const tr = await this.getById(id);
-    if (!tr) return null;
-    Object.assign(tr, updates);
-    return await this.repo.save(tr);
+  async update(id: number, update: DeepPartial<TemperatureReading>): Promise<TemperatureReading> {
+    await this.repo.update(id, update as any);
+    const updated = await this.getById(id);
+    if (!updated) throw new Error('TemperatureReading not found after update');
+    return updated;
   }
 
-  async delete(id: number): Promise<boolean> {
-    const res = await this.repo.delete(id);
-    return (res.affected ?? 0) > 0;
+  async delete(id: number): Promise<void> {
+    await this.repo.delete(id);
   }
 }
-
-

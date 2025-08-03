@@ -131,6 +131,30 @@ services:
       retries: 3
       start_period: 5s
 
+  data_service:
+    build:
+      context: ./service/data-service
+      dockerfile: Dockerfile
+    <<: *default-restart
+    ports:
+      - "${DATA_SERVICE_PORT}:5103"
+    env_file:
+      - .env  # ต้องแน่ใจว่า .env อยู่ใน ./service/data-service หรือ ปรับ path ให้ถูก
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: "postgresql://${DB_USER}:${DB_PASSWORD}@postgres:${DB_PORT}/${DB_NAME}"
+      DB_SCHEMA: thermo
+      # NODE_ENV: production
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5103/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
   watcher_service:
     build:
       context: ./service/watcher-service

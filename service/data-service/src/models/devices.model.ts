@@ -1,3 +1,4 @@
+// --- File: src/models/devices.model.ts ---
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -5,7 +6,6 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
-  Index,
 } from 'typeorm';
 import { TemperatureReading } from './temperatureReading.model';
 
@@ -26,7 +26,7 @@ export class Device {
   @Column({ type: 'text', nullable: true })
   location?: string;
 
-  @CreateDateColumn({ type: 'timestamptz' })
+  @Column({ type: 'timestamptz', default: () => 'NOW()' })
   installed_at!: Date;
 
   @CreateDateColumn({ type: 'timestamptz' })

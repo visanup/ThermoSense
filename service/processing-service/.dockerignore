@@ -1,4 +1,18 @@
+# Python artifacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
 
-node_modules
-dist
-.env.*
+# pip cache
+pip-log.txt
+
+# Environment file (mounted at runtime instead of baked in)
+.env
+
+# Git
+.git
+.gitignore
+
+# Docker context noise
+*.log

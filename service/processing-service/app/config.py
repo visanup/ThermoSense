@@ -1,47 +1,65 @@
-# utils/config.py
+## config.py
+
+from pathlib import Path
 from dotenv import load_dotenv
 import os
-from pathlib import Path
+import urllib.parse
 
-# 1. หาโฟลเดอร์ services (สองระดับเหนือไฟล์นี้)
-base_services = Path(__file__).resolve().parents[2]
+# --- load .env แบบยืดหยุ่น ---
+def find_dotenv_file() -> Path:
+    if os.getenv("DOTENV_PATH"):
+        return Path(os.getenv("DOTENV_PATH"))
+    p = Path(__file__).resolve()
+    for parent in list(p.parents)[:5]:
+        candidate = parent / ".env"
+        if candidate.exists():
+            return candidate
+    return Path(".env")  # fallback
 
-# 2. โหลดค่าจาก .env.common
-common_env = base_services / ".env"
-if common_env.exists():
-    load_dotenv(dotenv_path=common_env)
-    print(f"Loaded common env: {common_env}")
+dotenv_path = find_dotenv_file()
+load_dotenv(dotenv_path)
 
+# --- Core config container ---
 class Config:
-    # Database Config
-    DB_NAME: str = os.getenv("DB_NAME", "")
-    DB_USERNAME: str = os.getenv("DB_USER", "")
-    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
-    DB_HOST: str = os.getenv("DB_HOST", "host.docker.internal")
-    DB_PORT: int = int(os.getenv("DB_PORT", "5432"))
-    
-    # Full Database URL
-    FULL_DATABASE_URL: str = f"postgresql://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-   
-    # CORS Settings
-    CORS_ALLOWED_ORIGINS: list = os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
-    CORS_ALLOW_CREDENTIALS: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
-    CORS_ALLOW_METHODS: list = os.getenv("CORS_ALLOW_METHODS", "GET,POST,PUT,DELETE").split(",")
-    CORS_ALLOW_HEADERS: list = os.getenv("CORS_ALLOW_HEADERS", "Authorization,Content-Type,Accept").split(",")
-    
-    # API Key and Secrets
-    API_KEY: str = os.getenv("API_KEY", "default_api_key")
-    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "")
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "")
-    ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    
-    # Logging and Timeouts
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "DEBUG")
+    # --- RabbitMQ ---
+    RABBITMQ_HOST: str = os.getenv("RABBITMQ_HOST", "localhost")
+    RABBITMQ_PORT: int = int(os.getenv("RABBITMQ_PORT", "5672"))
+    RABBITMQ_VHOST: str = os.getenv("RABBITMQ_VHOST", "/")
+    RABBITMQ_USER: str = os.getenv("RABBITMQ_USER", "guest")
+    RABBITMQ_PASSWORD: str = os.getenv("RABBITMQ_PASSWORD", "guest")
+    RABBITMQ_EXCHANGE: str = os.getenv("RABBITMQ_EXCHANGE", "thermo_exchange")
+    RABBITMQ_QUEUE_RAW: str = os.getenv("RABBITMQ_QUEUE_RAW", "raw_created")
+    RABBITMQ_QUEUE_PROCESSED: str = os.getenv("RABBITMQ_QUEUE_PROCESSED", "processed_created")
+    RAW_ROUTING_KEY: str = os.getenv("RAW_ROUTING_KEY", "raw.created")
+    PROCESSED_ROUTING_KEY: str = os.getenv("PROCESSED_ROUTING_KEY", "processed.created")
+
+    # --- MinIO ---
+    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
+    MINIO_ROOT_USER: str = os.getenv("MINIO_ROOT_USER", "minioadmin")
+    MINIO_ROOT_PASSWORD: str = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
+    MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "false").lower() in ("1", "true", "yes")
+    MINIO_RAW_BUCKET: str = os.getenv("MINIO_RAW_BUCKET", "thermo-raw")
+    MINIO_PROCESSED_BUCKET: str = os.getenv("MINIO_PROCESSED_BUCKET", "thermo-processed")
+
+    # --- Optional / general ---
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     CONNECTION_TIMEOUT: int = int(os.getenv("CONNECTION_TIMEOUT", "10"))
     READ_TIMEOUT: int = int(os.getenv("READ_TIMEOUT", "30"))
-    TOKEN_EXPIRE_MINUTES: int = int(os.getenv("TOKEN_EXPIRE_MINUTES", "30"))
 
-    MODEL_VERSION : str = os.getenv("MODEL_VERSION", "0.0")
-    UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "/tmp")
-    MODEL_PATH: str = os.getenv("MODEL_PATH", "")
-    PORT: int = int(os.getenv("PREDICT_SERVICE_PORT", "3104"))
+    @classmethod
+    def get_rabbitmq_url(cls) -> str:
+        # vhost in URI must be URL-encoded; leading slash becomes %2f if present
+        vhost = cls.RABBITMQ_VHOST
+        if vhost == "/":
+            vhost_enc = "%2f"
+        else:
+            # strip leading slash for encode then re-add if needed
+            vhost_enc = urllib.parse.quote(vhost, safe="")
+        return f"amqp://{urllib.parse.quote(cls.RABBITMQ_USER)}:{urllib.parse.quote(cls.RABBITMQ_PASSWORD)}@{cls.RABBITMQ_HOST}:{cls.RABBITMQ_PORT}/{vhost_enc}"
+
+    @classmethod
+    def get_minio_endpoint_hostport(cls) -> str:
+        # strip schema if user passed http:// or https://
+        ep = cls.MINIO_ENDPOINT
+        ep = ep.replace("http://", "").replace("https://", "")
+        return ep

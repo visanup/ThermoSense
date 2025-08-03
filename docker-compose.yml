@@ -51,6 +51,7 @@ services:
     env_file:
       - .env
     environment:
+      RABBITMQ_DEFAULT_VHOST: thermo
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
       # Load definitions (topology) on startup
@@ -126,6 +127,31 @@ services:
       - default
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:5100/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  processing_service:
+    build:
+      context: ./service/processing-service
+      dockerfile: Dockerfile
+    <<: *default-restart
+    env_file:
+      - .env
+    volumes:
+      - ./service/processing-service:/app:delegated
+    networks:
+      - default
+    ports:
+      - "${PROCESSING_SERVICE_PORT}:5102"
+    depends_on:
+      - rabbitmq
+      - minio
+    environment:
+      DOTENV_PATH: /app/.env         # ช่วยให้ loader เจอ .env ภายใน container แน่นอน
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5102/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3

@@ -86,7 +86,7 @@
       "user": "processing_user",
       "vhost": "thermo",
       "configure": "",
-      "write": "processed_created",
+      "write": "thermo_exchange|processed_created",
       "read": "raw_created"
     },
     {

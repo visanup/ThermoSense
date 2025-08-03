@@ -15,7 +15,7 @@ import {
   ImageType,
   ObjectStatus,
 } from './imageObjects.service';
-import { getOrCreateDeviceByUID } from './device.service';
+import { getOrCreateDeviceByUID } from '../services/device.service';
 
 /**
  * แปลงจาก objectKey เป็น device_uid

@@ -9,7 +9,6 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
-  RelationId,
 } from 'typeorm';
 import { Device } from './devices.model';
 import { ImageObject } from './objectRecord.model';
@@ -20,12 +19,13 @@ export class TemperatureReading {
   @PrimaryGeneratedColumn('increment')
   id!: number;
 
+  // เก็บ foreign key เป็น column จริง
+  @Column({ name: 'device_id', type: 'integer' })
+  deviceId!: number;
+
   @ManyToOne(() => Device, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'device_id' })
   device!: Device;
-
-  @RelationId((reading: TemperatureReading) => reading.device)
-  deviceId!: number;
 
   @Column({ type: 'timestamptz' })
   recorded_at!: Date;
@@ -47,3 +47,4 @@ export class TemperatureReading {
   @UpdateDateColumn({ type: 'timestamptz' })
   updated_at!: Date;
 }
+

@@ -132,6 +132,31 @@ services:
       retries: 3
       start_period: 5s
 
+  ingestion_service:
+    build:
+      context: ./service/ingestion-service
+      dockerfile: Dockerfile
+    <<: *default-restart
+    env_file:
+      - .env
+    volumes:
+      - ./service/ingestion-service:/app:delegated
+    networks:
+      - default
+    ports:
+      - "${INGESTION_SERVICE_PORT}:5101"
+    depends_on:
+      - rabbitmq
+      - minio
+    environment:
+      DOTENV_PATH: /app/.env
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5101/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
   processing_service:
     build:
       context: ./service/processing-service

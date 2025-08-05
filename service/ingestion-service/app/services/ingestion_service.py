@@ -125,12 +125,25 @@ class IngestionService:
                 db.add(image_obj)
                 try:
                     db.commit()
+                    db.refresh(image_obj)  # ดึง id จริงจาก DB
+                    db_image_id = image_obj.id  # ใช้ id นี้แทน UUID image_id
                     logger.info(
-                        "Saved image object %s for camera %s (image_id=%s)", stored_name, camera_uid, image_id
+                        "Saved image object %s for camera %s (db image_id=%s, original image_id=%s)",
+                        stored_name, camera_uid, db_image_id, image_id
                     )
                 except IntegrityError as e:
                     db.rollback()
-                    logger.warning("Image object already exists (unique constraint) for image_id=%s: %s", image_id, e)
+                    logger.warning("Image object already exists (unique constraint) for original image_id=%s: %s", image_id, e)
+                    existing_obj = db.execute(
+                        select(ImageObject).where(
+                            ImageObject.minio_bucket == bucket,
+                            ImageObject.object_name == stored_name
+                        )
+                    ).scalar_one_or_none()
+                    if existing_obj:
+                        db_image_id = existing_obj.id
+                    else:
+                        db_image_id = None
 
             # mark processed และลบ session mapping เพื่อให้ capture ถัดไปได้ image_id ใหม่
             self.assembler.mark_processed(image_id)
@@ -141,3 +154,6 @@ class IngestionService:
                 logger.debug("Failed clearing camera session for %s", camera_uid)
         finally:
             RedisClient.release_lock(lock_name)
+
+        # คืนค่า db_image_id ที่เป็น integer เพื่อใช้ส่งต่อใน service อื่นๆ
+        return db_image_id

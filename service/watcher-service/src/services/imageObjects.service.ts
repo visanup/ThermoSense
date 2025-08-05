@@ -1,21 +1,17 @@
-// service/watcher-service/src/services/imageObjects.service.ts
-
 import { Repository } from 'typeorm';
 import { AppDataSource } from '../utils/dataSource';
 import {
   ImageObject,
-  ImageType as ImageTypeModel,
-  ObjectStatus as ObjectStatusModel,
+  ImageType,
+  ObjectStatus,
 } from '../models/objectRecord.model';
 
-// re-export types เพื่อให้ไฟล์อื่น import ได้ตรงนี้
-export type ImageType = ImageTypeModel;
-export type ObjectStatus = ObjectStatusModel;
+export type { ImageType, ObjectStatus };
 
 const repo: Repository<ImageObject> = AppDataSource.getRepository(ImageObject);
 
 /**
- * Upsert image object (create or update) based on bucket + objectName uniqueness.
+ * Upsert (create or update) an ImageObject based on unique minioBucket + objectName.
  */
 export async function upsertImageObject(params: {
   deviceId: number;
@@ -40,10 +36,8 @@ export async function upsertImageObject(params: {
     status = 'pending',
   } = params;
 
-  let existing = await repo.findOne({
-    where: { minioBucket, objectName },
-  });
-
+  // Try find existing
+  let existing = await repo.findOne({ where: { minioBucket, objectName } });
   if (existing) {
     existing.deviceId = deviceId;
     existing.recordedAt = recordedAt;
@@ -55,6 +49,7 @@ export async function upsertImageObject(params: {
     return repo.save(existing);
   }
 
+  // Create new
   const newObj = repo.create({
     deviceId,
     recordedAt,
@@ -66,27 +61,55 @@ export async function upsertImageObject(params: {
     metadata,
     status,
   });
-  return repo.save(newObj);
+
+  try {
+    return await repo.save(newObj);
+  } catch (err: any) {
+    // Handle duplicate insert race
+    if (err.code === '23505') {
+      existing = await repo.findOne({ where: { minioBucket, objectName } });
+      if (existing) {
+        existing.deviceId = deviceId;
+        existing.recordedAt = recordedAt;
+        existing.objectVersion = objectVersion;
+        existing.checksum = checksum;
+        existing.imageType = imageType;
+        existing.metadata = { ...existing.metadata, ...metadata };
+        existing.status = status;
+        return repo.save(existing);
+      }
+    }
+    throw err;
+  }
 }
 
 /**
- * Query helpers
+ * Get an ImageObject by bucket and object name.
  */
 export async function getImageObjectByBucketName(
   minioBucket: string,
   objectName: string
 ): Promise<ImageObject | null> {
-  return repo.findOne({
-    where: { minioBucket, objectName },
-  });
+  return repo.findOne({ where: { minioBucket, objectName } });
 }
 
-export async function updateImageStatus(id: string, status: ObjectStatus): Promise<void> {
+/**
+ * Update the status of an ImageObject.
+ */
+export async function updateImageStatus(
+  id: string,
+  status: ObjectStatus
+): Promise<void> {
   await repo.update(id, { status });
 }
 
-export async function listPendingObjects(imageType?: ImageType): Promise<ImageObject[]> {
-  const where: any = { status: 'pending' as ObjectStatus };
+/**
+ * List ImageObjects in 'pending' status, optionally filtered by imageType.
+ */
+export async function listPendingObjects(
+  imageType?: ImageType
+): Promise<ImageObject[]> {
+  const where: any = { status: 'pending' };
   if (imageType) where.imageType = imageType;
   return repo.find({ where, order: { recordedAt: 'DESC' } });
 }

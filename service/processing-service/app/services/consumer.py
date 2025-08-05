@@ -2,7 +2,6 @@
 
 import json
 import uuid
-import time
 from typing import Callable, Optional
 
 import pika
@@ -19,7 +18,7 @@ logger = get_logger("consumer")
 
 
 class RabbitMQConsumer:
-    def __init__(self, on_error: Optional[Callable[[Exception], None]] = None):
+    def __init__(self, on_error: Optional[Callable[[Exception], None]] = None, roi: tuple[int, int, int, int] = (0, 0, 0, 0)):
         self.url = Config.get_rabbitmq_url()
         self.exchange = Config.RABBITMQ_EXCHANGE
         self.raw_queue = Config.RABBITMQ_QUEUE_RAW
@@ -31,7 +30,8 @@ class RabbitMQConsumer:
         self.channel: Optional[pika.adapters.blocking_connection.BlockingChannel] = None
 
         self.uploader = MinioUploader()
-        self.processor = Processor()
+        self.roi = roi
+        self.processor = Processor(self.roi)
         self.publisher = Publisher()
 
     @retry(total_tries=5, initial_delay=1.0, backoff=2.0)
@@ -56,7 +56,8 @@ class RabbitMQConsumer:
         try:
             msg = json.loads(body)
             image_id = msg.get("id") or str(uuid.uuid4())
-            raw_object_name = msg.get("raw_object_name")
+            # support both keys
+            raw_object_name = msg.get("raw_object_name") or msg.get("objectKey")
             if not raw_object_name:
                 raise ValueError("raw_object_name missing in message")
             logger.info(f"Received raw.created: id={image_id} object={raw_object_name}")
@@ -75,7 +76,8 @@ class RabbitMQConsumer:
 
             # Publish event downstream
             self.publisher.publish_processed_event(
-                image_id=image_id, processed_object_name=processed_name
+                image_id=image_id,
+                processed_object_name=processed_name
             )
 
             ch.basic_ack(delivery_tag=delivery_tag)
@@ -97,7 +99,9 @@ class RabbitMQConsumer:
         try:
             self._connect()
         except Exception as e:
-            logger.error("Failed to establish connection to RabbitMQ after retries, exiting consumer")
+            logger.error(
+                "Failed to establish connection to RabbitMQ after retries, exiting consumer"
+            )
             if self.on_error:
                 self.on_error(e)
             return

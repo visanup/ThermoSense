@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "es5",                          // รันบนเบราว์เซอร์รุ่นเก่าได้
+    "lib": ["dom", "dom.iterable", "esnext"], // ไลบรารีที่จะใช้
+    "allowJs": true,                          // ยอมให้ .js ในโปรเจกต์
+    "skipLibCheck": true,                     // ข้ามการเช็ค type ของไลบรารีใน node_modules
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,                           // เปิด strict mode
+    "forceConsistentCasingInFileNames": true,
+    "module": "esnext",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,                           // ไม่ต้องสร้างไฟล์ .js ออกมา (react-scripts จัดการให้)
+    "jsx": "react-jsx"                        // พิมพ์ JSX ใน React 17+ หรือ React 18
+  },
+  "include": ["src"],                         // ให้ตรวจสอบแค่ไฟล์ใน src/
+  "exclude": ["node_modules", "build"]        // ตัดทิ้งโฟลเดอร์ที่ไม่ต้องการ
+}

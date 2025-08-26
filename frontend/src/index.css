@@ -1,0 +1,7 @@
+/* src/index.css */
+/* คุณอาจจะลบไฟล์นี้ หรือให้มีแค่ global body style */
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background-color: #f5f5f5;
+}

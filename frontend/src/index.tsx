@@ -1,0 +1,10 @@
+// src/index.tsx
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+// ถ้ามีบรรทัดนี้ ให้คอมเมนต์หรือเอาออกชั่วคราว
+// import './index.css';
+
+const root = ReactDOM.createRoot(document.getElementById('root')!);
+root.render(<React.StrictMode><App /></React.StrictMode>);
+
